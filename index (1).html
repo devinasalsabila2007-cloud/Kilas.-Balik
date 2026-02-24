@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kilas.Balik</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Pacifico&display=swap" rel="stylesheet">
+<!-- Supabase JS SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- ══════════════════════════════════════════════════════════
+     FIREBASE CLOUD MESSAGING (FCM)
+     Notifikasi push — foreground & background
+     ══════════════════════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp }              from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+  import { getMessaging, getToken, onMessage }
+                                         from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
+
+  // ── Konfigurasi Firebase ────────────────────────────────────
+  const FIREBASE_CONFIG = {
+    apiKey           : "AIzaSyAE58TY5vK6vwjqN9UodQ_SG2ccpKIClJk",
+    authDomain       : "kilas-balik-3d587.firebaseapp.com",
+    projectId        : "kilas-balik-3d587",
+    storageBucket    : "kilas-balik-3d587.firebasestorage.app",
+    messagingSenderId: "996232040867",
+    appId            : "1:996232040867:web:b7ec3d648e0e8b17c20a16"
+  };
+
+  // ── VAPID Key (dari Firebase Console → Cloud Messaging) ─────
+  const VAPID_KEY = "BE2Qri1JM1HcgBW4T4o2dF_COwar7ibUQKoQjMGBB4qE7KlrnwTW6mA1tLNUghqayahG81MCOhx4xdafQSFBR14";
+
+  // ── Inisialisasi ────────────────────────────────────────────
+  const firebaseApp = initializeApp(FIREBASE_CONFIG);
+  const messaging   = getMessaging(firebaseApp);
+
+  // ── Fungsi utama: daftarkan SW → minta izin → ambil token ──
+  async function initFCM() {
+    // 1. Pastikan browser mendukung Service Worker
+    if (!('serviceWorker' in navigator)) {
+      console.warn('[FCM] Browser tidak mendukung Service Worker.');
+      return;
+    }
+
+    // 2. Daftarkan Service Worker
+    let swReg;
+    try {
+      swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      console.log('[FCM] ✅ Service Worker terdaftar:', swReg.scope);
+    } catch (err) {
+      console.error('[FCM] ❌ Gagal mendaftar Service Worker:', err);
+      return;
+    }
+
+    // 3. Minta izin notifikasi dari pengguna
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.warn('[FCM] ⚠️ Izin notifikasi ditolak pengguna.');
+      return;
+    }
+    console.log('[FCM] ✅ Izin notifikasi diberikan.');
+
+    // 4. Ambil FCM Token
+    try {
+      const token = await getToken(messaging, {
+        vapidKey                 : VAPID_KEY,
+        serviceWorkerRegistration: swReg
+      });
+
+      if (token) {
+        console.log('[FCM] 🔑 Token berhasil didapat:', token);
+        // Simpan token — bisa kamu kirim ke Supabase / server untuk targeting notifikasi
+        sessionStorage.setItem('fcm_token', token);
+        window._fcmToken = token;
+      } else {
+        console.warn('[FCM] Tidak dapat mengambil token FCM.');
+      }
+    } catch (err) {
+      console.error('[FCM] ❌ Gagal mengambil token:', err);
+    }
+
+    // 5. Tangani notifikasi saat app SEDANG TERBUKA (foreground)
+    onMessage(messaging, (payload) => {
+      console.log('[FCM] 📩 Notifikasi foreground:', payload);
+      const title = payload.notification?.title ?? '🧹 Kilas.Balik';
+      const body  = payload.notification?.body  ?? 'Ada info baru!';
+
+      // Gunakan toast bawaan aplikasi jika sudah tersedia
+      if (typeof toast === 'function') {
+        toast(`🔔 ${title}: ${body}`);
+      } else {
+        // Fallback: Notification API manual
+        new Notification(title, { body, icon: '/icon-192.png' });
+      }
+    });
+  }
+
+  // ── Jalankan FCM setelah halaman load (tunda 3 dtk agar
+  //    splash screen selesai animasi terlebih dahulu) ──────────
+  window.addEventListener('load', () => {
+    setTimeout(initFCM, 3000);
+  });
+
+  // Expose ke scope global jika ingin dipanggil manual
+  window.initFCM = initFCM;
+</script>
+<style>
+:root{
+  --pu:#9575CD;--pu2:#B39DDB;--pu3:#EDE7F6;--pu4:#7B52C1;
+  --pk:#EC407A;--pk2:#F48FB1;--pk3:#FCE4EC;
+  --tx:#3D2B5E;--txm:#6B4FA0;--txl:#9E8BBF;
+  --card:rgba(255,255,255,0.9);--sh:0 6px 24px rgba(149,117,205,0.18);
+  --r:18px;--rs:11px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Nunito',sans-serif;background:linear-gradient(140deg,#F0EBFF 0%,#FCE4F5 55%,#EAE0FF 100%);min-height:100vh;color:var(--tx)}
+
+/* SPLASH */
+#splash{position:fixed;inset:0;z-index:9999;background:linear-gradient(145deg,#C9B8F0,#F8BBD9,#9575CD);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .5s ease}
+#splash.out{opacity:0;pointer-events:none}
+.sp-e{font-size:5rem;margin-bottom:12px;animation:bob 1.2s ease infinite alternate}
+.sp-t{font-family:'Pacifico',cursive;font-size:2.6rem;color:#fff;text-shadow:0 3px 16px rgba(60,10,100,.3)}
+.sp-s{color:rgba(255,255,255,.85);font-size:.78rem;font-weight:700;margin-top:7px;text-align:center;padding:0 20px}
+@keyframes bob{from{transform:translateY(0) rotate(-3deg)}to{transform:translateY(-14px) rotate(3deg)}}
+
+/* PAGE SYSTEM */
+.page{display:none;min-height:100vh;padding:20px;animation:pu .3s ease}
+.page.active{display:block}
+@keyframes pu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+/* NAV */
+.nav{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;margin:-20px -20px 18px;background:rgba(255,255,255,.8);backdrop-filter:blur(20px);border-bottom:1px solid rgba(179,157,219,.2);position:sticky;top:0;z-index:100}
+.nav-logo{font-family:'Pacifico',cursive;font-size:1.25rem;background:linear-gradient(135deg,var(--pu),var(--pk));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav-r{display:flex;align-items:center;gap:10px;font-size:1.15rem}
+.back-btn{background:rgba(149,117,205,.12);border:none;cursor:pointer;font-family:'Nunito',sans-serif;font-weight:800;font-size:.82rem;color:var(--pu);padding:6px 12px;border-radius:50px;display:flex;align-items:center;gap:4px}
+
+/* CARD */
+.card{background:var(--card);border-radius:var(--r);padding:18px;box-shadow:var(--sh);border:1px solid rgba(255,255,255,.88);margin-bottom:14px}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:12px 22px;border:none;border-radius:50px;cursor:pointer;font-family:'Nunito',sans-serif;font-size:.88rem;font-weight:800;transition:all .18s;width:100%}
+.btn:active{transform:scale(.96)}
+.btn-p{background:linear-gradient(135deg,var(--pu),var(--pk));color:#fff;box-shadow:0 5px 18px rgba(149,117,205,.4)}
+.btn-s{background:rgba(179,157,219,.14);color:var(--tx);border:2px solid var(--pu2)}
+.btn-pk{background:linear-gradient(135deg,var(--pk2),var(--pk));color:#fff;box-shadow:0 5px 18px rgba(244,143,177,.38)}
+.btn:hover{transform:translateY(-1px)}
+
+/* INPUTS */
+.fg{margin-bottom:12px}
+.fl{display:block;font-size:.78rem;font-weight:800;color:var(--txm);margin-bottom:4px}
+.fi,.fs{width:100%;padding:11px 14px;background:rgba(255,255,255,.88);border:2px solid rgba(179,157,219,.28);border-radius:var(--rs);font-family:'Nunito',sans-serif;font-size:.88rem;color:var(--tx);outline:none;transition:border-color .2s}
+.fi:focus,.fs:focus{border-color:var(--pu2);background:#fff}
+
+/* CHIPS */
+.chip{display:inline-block;padding:3px 10px;border-radius:50px;font-size:.7rem;font-weight:800}
+.cg{background:#E8F5E9;color:#2E7D32}.cr{background:#FFEBEE;color:#C62828}
+.cp{background:var(--pu3);color:var(--pu4)}.cpk{background:var(--pk3);color:var(--pk)}
+.co{background:#FFF3E0;color:#E65100}.cgd{background:#FFF8E1;color:#F57F17}
+
+/* GREETING */
+.gr{font-size:1.35rem;font-weight:900}
+.gr span{background:linear-gradient(135deg,var(--pu),var(--pk));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.grsub{font-size:.78rem;color:var(--txl);font-weight:600;margin:2px 0 16px}
+
+/* STATUS CARD */
+.stcard{background:linear-gradient(135deg,var(--pu),var(--pk));border-radius:var(--r);padding:18px;margin-bottom:14px;color:#fff;position:relative;overflow:hidden}
+.stcard .dc{position:absolute;right:-8px;top:-8px;font-size:4.5rem;opacity:.11}
+
+/* STAT GRID */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.si{background:var(--card);border-radius:var(--rs);padding:12px;text-align:center;box-shadow:var(--sh)}
+.sn{font-size:1.8rem;font-weight:900;background:linear-gradient(135deg,var(--pu),var(--pk));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sl{font-size:.68rem;color:var(--txl);font-weight:700}
+
+/* BOTTOM NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.93);backdrop-filter:blur(22px);padding:9px 8px 16px;display:flex;border-top:1px solid rgba(179,157,219,.18);box-shadow:0 -6px 28px rgba(149,117,205,.1);z-index:200}
+.bni{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;flex:1;font-size:.61rem;font-weight:800;color:var(--txl);transition:color .2s}
+.bni.active{color:var(--pu)}
+.bnc{font-size:1.2rem}
+
+/* PHOTO ZONE */
+.pzone{border:2.5px dashed var(--pu2);border-radius:var(--r);padding:24px 14px;text-align:center;background:rgba(179,157,219,.07);cursor:pointer;transition:all .2s;margin-bottom:11px;overflow:hidden}
+.pzone:hover{border-color:var(--pu);background:rgba(179,157,219,.13)}
+.pzone img{width:100%;border-radius:var(--rs);max-height:200px;object-fit:cover;display:none}
+.pzone .ph{display:block}.phico{font-size:2.5rem;margin-bottom:6px}
+.pzone.has img{display:block}.pzone.has .ph{display:none}
+.poptz{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+input[type=file]{display:none}
+
+/* BADGE ROWS */
+.brow{display:flex;align-items:center;gap:12px;padding:12px;background:var(--card);border-radius:var(--rs);margin-bottom:8px;border:1px solid rgba(255,255,255,.88);box-shadow:var(--sh)}
+.bico{font-size:2.2rem}
+.blk{filter:grayscale(1);opacity:.4}
+
+/* STARS */
+.srow{display:flex;gap:4px;justify-content:center;margin:6px 0}
+.sis{font-size:1.55rem}
+.se{filter:grayscale(1);opacity:.2}
+
+/* PROGRESS */
+.pbar{background:rgba(179,157,219,.18);border-radius:50px;height:8px;overflow:hidden}
+.pfil{height:100%;background:linear-gradient(90deg,var(--pu2),var(--pk2));border-radius:50px;transition:width .5s ease}
+
+/* LIST ROWS */
+.hrow,.srow2{display:flex;justify-content:space-between;align-items:center;padding:11px 13px;background:var(--card);border-radius:var(--rs);margin-bottom:7px;border:1px solid rgba(255,255,255,.88);box-shadow:0 3px 12px rgba(149,117,205,.09);cursor:pointer;transition:transform .14s}
+.hrow:active,.srow2:active{transform:scale(.97)}
+.sav{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--pu2),var(--pk2));display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+.sinf{flex:1;margin-left:9px}
+.snm{font-weight:800;font-size:.86rem}
+.smt{font-size:.7rem;color:var(--txl);margin-top:1px}
+
+/* MODAL */
+.mo{position:fixed;inset:0;background:rgba(30,5,60,.5);backdrop-filter:blur(8px);z-index:800;display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity .28s}
+.mo.open{opacity:1;pointer-events:all}
+.ms{background:#fff;border-radius:22px 22px 0 0;padding:18px;width:100%;max-height:90vh;overflow-y:auto;transform:translateY(100%);transition:transform .32s cubic-bezier(.175,.885,.32,1.275)}
+.mo.open .ms{transform:translateY(0)}
+.mh{width:38px;height:4px;background:#DDD;border-radius:2px;margin:0 auto 15px}
+
+/* TOAST */
+.toast{position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-110px);background:#fff;border-radius:14px;padding:11px 18px;box-shadow:0 6px 28px rgba(0,0,0,.12);z-index:1200;font-weight:800;font-size:.81rem;color:var(--tx);transition:transform .38s cubic-bezier(.175,.885,.32,1.275);max-width:290px;text-align:center;border-left:4px solid var(--pu)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+
+/* SECTION TITLE */
+.stl{font-size:.9rem;font-weight:900;color:var(--tx);margin-bottom:9px;display:flex;align-items:center;gap:6px}
+
+/* TABS */
+.tabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
+.tabs::-webkit-scrollbar{display:none}
+.tbn{padding:6px 13px;border-radius:50px;border:2px solid var(--pu2);background:transparent;font-family:'Nunito',sans-serif;font-weight:800;font-size:.74rem;cursor:pointer;color:var(--txm);white-space:nowrap;transition:all .18s}
+.tbn.active{background:linear-gradient(135deg,var(--pu),var(--pk));color:#fff;border-color:transparent}
+
+/* AUTH TABS */
+.atabs{display:flex;background:rgba(179,157,219,.14);border-radius:50px;padding:3px;margin-bottom:15px}
+.atab{flex:1;padding:9px;text-align:center;border-radius:50px;font-weight:800;font-size:.84rem;cursor:pointer;transition:all .2s;color:var(--txl)}
+.atab.active{background:#fff;color:var(--pu);box-shadow:0 3px 10px rgba(179,157,219,.28)}
+.aform{display:none}.aform.active{display:block}
+
+/* ADMIN CHIP */
+.achip{display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#FFD700,#FFA500);color:#fff;padding:3px 10px;border-radius:50px;font-size:.7rem;font-weight:900}
+
+/* NOTIF DOT */
+.ndot{display:inline-block;width:7px;height:7px;background:var(--pk);border-radius:50%;vertical-align:top;margin-top:1px}
+
+/* TOGGLE */
+.tog{width:46px;height:26px;border-radius:50px;cursor:pointer;position:relative;transition:background .28s;flex-shrink:0}
+.tok{width:20px;height:20px;background:#fff;border-radius:50%;position:absolute;top:3px;transition:left .28s;box-shadow:0 1px 5px rgba(0,0,0,.18)}
+.tog.on{background:var(--pu)}.tog.on .tok{left:23px}
+.tog.off{background:#CCC}.tog.off .tok{left:3px}
+
+/* MISC */
+.spacer{height:88px}
+.pmi{width:100%;border-radius:var(--r);margin-bottom:10px}
+
+/* EMPTY STATE */
+.empty{text-align:center;color:var(--txl);padding:36px 20px;font-size:.82rem}
+
+/* INFO BANNER */
+.info-banner{background:linear-gradient(135deg,var(--pu3),var(--pk3));border-radius:var(--rs);padding:10px 14px;margin-bottom:12px;font-size:.76rem;color:var(--txm);font-weight:700;border:1px solid rgba(149,117,205,.2)}
+
+/* REALTIME BADGE */
+.rt-badge{display:inline-flex;align-items:center;gap:4px;background:#E8F5E9;color:#2E7D32;padding:3px 8px;border-radius:50px;font-size:.65rem;font-weight:800}
+.rt-dot{width:6px;height:6px;background:#4CAF50;border-radius:50%;animation:pulse-dot 1.5s infinite}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.7)}}
+
+/* NEW CARD ANIMATION */
+@keyframes slideInNew{from{opacity:0;transform:translateY(-16px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.new-entry{animation:slideInNew .45s ease}
+
+/* LOADING SPINNER */
+.spin{display:inline-block;width:18px;height:18px;border:3px solid rgba(149,117,205,.2);border-top-color:var(--pu);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* AUTH ERROR STYLES */
+.auth-err{background:#FFEBEE;border:1.5px solid #EF9A9A;border-radius:var(--rs);padding:10px 13px;margin-bottom:12px;font-size:.78rem;font-weight:700;color:#C62828;display:flex;align-items:flex-start;gap:7px;line-height:1.4}
+.auth-err .err-icon{font-size:1rem;flex-shrink:0;margin-top:1px}
+.auth-err .err-text{flex:1}
+.field-err{font-size:.72rem;color:#E53935;font-weight:700;margin-top:3px;min-height:14px}
+.fi.err-field{border-color:#EF9A9A !important;background:#FFF5F5 !important}
+.fi.ok-field{border-color:#A5D6A7 !important}
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="sp-e">🧹</div>
+  <div class="sp-t">Kilas.Balik</div>
+  <div class="sp-s">Kelas Ikhlas Bersih-Bersih, Baru Boleh Balik</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ============================================================
+     AUTH PAGE
+============================================================ -->
+<div class="page active" id="pg-auth">
+  <div style="text-align:center;padding:34px 0 20px">
+    <div style="font-size:3rem;margin-bottom:10px">🧹</div>
+    <div style="font-family:'Pacifico',cursive;font-size:2.2rem;background:linear-gradient(135deg,var(--pu),var(--pk));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Kilas.Balik</div>
+    <div style="font-size:.73rem;color:var(--txl);font-weight:700;margin-top:5px">Kelas Ikhlas Bersih-Bersih, Baru Boleh Balik</div>
+  </div>
+
+  <div class="card">
+    <div class="atabs">
+      <div class="atab active" id="atl" onclick="swTab('l')">Masuk</div>
+      <div class="atab" id="atr" onclick="swTab('r')">Daftar</div>
+    </div>
+
+    <!-- ── LOGIN FORM ── -->
+    <div class="aform active" id="afl">
+      <!-- Kotak error login — muncul otomatis saat ada masalah -->
+      <div id="err-login" class="auth-err" style="display:none">
+        <span class="err-icon">⚠️</span><span class="err-text" id="err-login-txt"></span>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Username</label>
+        <input class="fi" id="lu" type="text" placeholder="Username kamu" autocomplete="off"
+               oninput="clearFieldErr('lu','err-login')">
+        <div class="field-err" id="err-lu"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Password</label>
+        <input class="fi" id="lp" type="password" placeholder="Password kamu"
+               oninput="clearFieldErr('lp','err-login')"
+               onkeydown="if(event.key==='Enter') doLogin()">
+        <div class="field-err" id="err-lp"></div>
+      </div>
+      <button class="btn btn-p" id="btn-login" onclick="doLogin()">✨ Masuk</button>
+      <p style="text-align:center;margin-top:10px;font-size:.78rem;color:var(--txl)">Belum punya akun? <span style="color:var(--pu);font-weight:800;cursor:pointer" onclick="swTab('r')">Daftar</span></p>
+    </div>
+
+    <!-- ── REGISTER FORM ── -->
+    <div class="aform" id="afr">
+      <!-- Kotak error daftar — muncul otomatis saat ada masalah -->
+      <div id="err-reg" class="auth-err" style="display:none">
+        <span class="err-icon">⚠️</span><span class="err-text" id="err-reg-txt"></span>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Username <span style="color:var(--pk)">*</span></label>
+        <input class="fi" id="ru" type="text" placeholder="Huruf/angka tanpa spasi (cth: budi123)" autocomplete="off"
+               oninput="clearFieldErr('ru','err-reg')">
+        <div class="field-err" id="err-ru"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Nama Lengkap <span style="color:var(--pk)">*</span></label>
+        <input class="fi" id="rn" type="text" placeholder="Nama lengkap kamu"
+               oninput="clearFieldErr('rn','err-reg')">
+        <div class="field-err" id="err-rn"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Kelas <span style="color:var(--pk)">*</span></label>
+        <input class="fi" id="rk" type="text" placeholder="Contoh: 10A, 11B, 12C"
+               oninput="clearFieldErr('rk','err-reg')">
+        <div class="field-err" id="err-rk"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Hari Piket <span style="color:var(--pk)">*</span></label>
+        <select class="fs" id="rd" onchange="clearFieldErr('rd','err-reg')">
+          <option value="">-- Pilih hari piket --</option>
+          <option>Senin</option><option>Selasa</option><option>Rabu</option><option>Kamis</option><option>Jumat</option>
+        </select>
+        <div class="field-err" id="err-rd"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Password <span style="color:var(--pk)">*</span></label>
+        <input class="fi" id="rp" type="password" placeholder="Minimal 6 karakter"
+               oninput="clearFieldErr('rp','err-reg')"
+               onkeydown="if(event.key==='Enter') doRegister()">
+        <div class="field-err" id="err-rp"></div>
+      </div>
+      <button class="btn btn-p" id="btn-register" onclick="doRegister()">🌟 Daftar Sekarang</button>
+      <p style="text-align:center;margin-top:10px;font-size:.78rem;color:var(--txl)">Sudah punya akun? <span style="color:var(--pu);font-weight:800;cursor:pointer" onclick="swTab('l')">Masuk</span></p>
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:.78rem;color:var(--txl);margin-bottom:10px">
+    Admin sekolah? <span style="color:var(--pk);font-weight:800;cursor:pointer" onclick="openM('m-adm')">Login Admin 👑</span>
+  </div>
+
+  <!-- Status koneksi Supabase — indicator real-time -->
+  <div id="supa-status" class="info-banner" style="display:flex;align-items:center;gap:8px">
+    <span id="supa-dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#CCC;flex-shrink:0;transition:background .4s"></span>
+    <span id="supa-msg" style="font-size:.74rem">Memeriksa koneksi ke Supabase...</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     STUDENT DASHBOARD
+============================================================ -->
+<div class="page" id="pg-dash">
+  <div class="nav">
+    <div class="nav-logo">Kilas.Balik</div>
+    <div class="nav-r">
+      <span style="cursor:pointer;position:relative" onclick="openNotif()">🔔<span class="ndot" id="ndot" style="display:none"></span></span>
+      <span style="cursor:pointer" onclick="openM('m-logout')">🚪</span>
+    </div>
+  </div>
+  <div class="gr">Halo, <span id="dn">—</span>! 👋</div>
+  <div class="grsub" id="dd"></div>
+
+  <div class="stcard">
+    <div class="dc">🧹</div>
+    <div style="font-size:.7rem;font-weight:800;opacity:.72;margin-bottom:3px">STATUS HARI INI</div>
+    <div style="font-size:1.18rem;font-weight:900" id="dst">Belum Piket 🧹</div>
+    <div style="font-size:.74rem;margin-top:2px;opacity:.82" id="dpd"></div>
+    <div class="srow" id="dstar-row">
+      <span class="sis se">⭐</span><span class="sis se">⭐</span><span class="sis se">⭐</span>
+    </div>
+  </div>
+
+  <div class="sg">
+    <div class="si"><div class="sn" id="dtot">0</div><div class="sl">Total Piket</div></div>
+    <div class="si"><div class="sn" id="dstr">0</div><div class="sl">Bintang ⭐</div></div>
+    <div class="si"><div class="sn" id="dtep">0</div><div class="sl">Tepat ✅</div></div>
+    <div class="si"><div class="sn" id="dtel">0</div><div class="sl">Telat ⚠️</div></div>
+  </div>
+
+  <div class="card">
+    <div class="stl">🏆 Progress Kedisiplinan</div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+      <span style="font-size:.74rem;color:var(--txl);font-weight:700">Menuju Pejuang Kebersihan</span>
+      <span style="font-size:.74rem;font-weight:900;color:var(--pu)" id="dpct">0%</span>
+    </div>
+    <div class="pbar"><div class="pfil" id="dbar" style="width:0%"></div></div>
+    <div style="font-size:.68rem;color:var(--txl);margin-top:6px">Piket 5× tepat waktu untuk mendapat lencana 🏅</div>
+  </div>
+
+  <div class="stl">⚡ Aksi Cepat</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:13px">
+    <button class="btn btn-p" style="border-radius:var(--r)" onclick="go('pg-photo')">📸 Absen Piket</button>
+    <button class="btn btn-s" style="border-radius:var(--r)" onclick="go('pg-hist')">📋 Riwayat</button>
+    <button class="btn btn-pk" style="border-radius:var(--r)" onclick="go('pg-badge')">🏅 Lencana</button>
+    <button class="btn btn-s" style="border-radius:var(--r)" onclick="go('pg-prof')">👤 Profil</button>
+  </div>
+
+  <div class="stl">🕐 Piket Terakhir</div>
+  <div id="drec"></div>
+  <div class="spacer"></div>
+
+  <div class="bnav">
+    <div class="bni active" onclick="go('pg-dash')"><div class="bnc">🏠</div><div>Beranda</div></div>
+    <div class="bni" onclick="go('pg-photo')"><div class="bnc">📸</div><div>Absen</div></div>
+    <div class="bni" onclick="go('pg-hist')"><div class="bnc">📋</div><div>Riwayat</div></div>
+    <div class="bni" onclick="go('pg-badge')"><div class="bnc">🏅</div><div>Lencana</div></div>
+    <div class="bni" onclick="go('pg-prof')"><div class="bnc">👤</div><div>Profil</div></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PHOTO PAGE
+============================================================ -->
+<div class="page" id="pg-photo">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">📸 Absen Piket</span>
+    <div></div>
+  </div>
+
+  <div class="card" style="background:linear-gradient(135deg,var(--pu3),var(--pk3));border:none;text-align:center">
+    <div style="font-weight:900;font-size:.82rem;color:var(--tx)">⏰ Sisa Waktu Upload</div>
+    <div style="font-size:1.65rem;font-weight:900;color:var(--pu4);margin:4px 0" id="phcd">—</div>
+    <div style="font-size:.71rem;color:var(--txm);font-weight:700" id="phst">Upload sebelum 16.00 untuk ⭐⭐⭐</div>
+  </div>
+
+  <div class="card">
+    <div class="stl">🌅 Foto Sebelum Piket</div>
+    <div class="pzone" id="bz">
+      <div class="ph"><div class="phico">🌅</div><div style="font-weight:800;color:var(--txm);font-size:.88rem">Foto Kondisi Awal</div><div style="font-size:.71rem;color:var(--txl);margin-top:3px">Sebelum mulai bersih-bersih</div></div>
+      <img id="bi" src="" alt="">
+    </div>
+    <div class="poptz">
+      <button class="btn btn-p" onclick="pickPh('b','c')">📷 Kamera</button>
+      <button class="btn btn-s" onclick="pickPh('b','g')">🖼️ Galeri</button>
+    </div>
+    <input type="file" id="ib" accept="image/*">
+  </div>
+
+  <div class="card">
+    <div class="stl">✨ Foto Sesudah Piket</div>
+    <div class="pzone" id="az">
+      <div class="ph"><div class="phico">✨</div><div style="font-weight:800;color:var(--txm);font-size:.88rem">Foto Hasil Bersih-Bersih</div><div style="font-size:.71rem;color:var(--txl);margin-top:3px">Setelah piket selesai</div></div>
+      <img id="ai" src="" alt="">
+    </div>
+    <div class="poptz">
+      <button class="btn btn-pk" onclick="pickPh('a','c')">📷 Kamera</button>
+      <button class="btn btn-s" onclick="pickPh('a','g')">🖼️ Galeri</button>
+    </div>
+    <input type="file" id="ia" accept="image/*">
+  </div>
+
+  <button class="btn btn-p" style="font-size:.92rem;padding:14px" id="btnSubmit" onclick="submitPiket()">🚀 Kirim Absen Piket</button>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     HISTORY PAGE
+============================================================ -->
+<div class="page" id="pg-hist">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">📋 Riwayat Piket</span>
+    <div></div>
+  </div>
+  <div class="tabs">
+    <button class="tbn active" onclick="hf('all',this)">Semua</button>
+    <button class="tbn" onclick="hf('t',this)">Tepat ✅</button>
+    <button class="tbn" onclick="hf('l',this)">Telat ⚠️</button>
+  </div>
+  <div id="hlist"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     BADGE PAGE
+============================================================ -->
+<div class="page" id="pg-badge">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">🏅 Lencana</span>
+    <div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div style="font-size:3rem" id="bmi">🔒</div>
+    <div style="font-weight:900;font-size:.98rem;margin:7px 0" id="bmt">Kumpulkan Lencana!</div>
+    <div style="font-size:.76rem;color:var(--txl)" id="bmd">Lakukan piket tepat waktu untuk mendapat lencana</div>
+    <div class="srow" id="bsrow"><span class="sis se">⭐</span><span class="sis se">⭐</span><span class="sis se">⭐</span></div>
+    <div style="font-size:.71rem;color:var(--txl)" id="bsc">0 bintang total</div>
+  </div>
+  <div class="stl">🎖️ Koleksi Lencana</div>
+  <div class="brow"><div class="bico blk" id="bi-r">✨</div><div><div style="font-weight:800;font-size:.88rem">Si Rajin</div><div style="font-size:.74rem;color:var(--txl)">Upload foto piket pertama kali</div><div style="margin-top:4px" id="bsr"></div></div></div>
+  <div class="brow"><div class="bico blk" id="bi-p">🏅</div><div><div style="font-weight:800;font-size:.88rem">Pejuang Kebersihan</div><div style="font-size:.74rem;color:var(--txl)">Piket 5× tepat waktu tanpa pernah telat</div><div style="margin-top:4px" id="bsp"></div></div></div>
+  <div class="brow"><div class="bico blk" id="bi-k">🌟</div><div><div style="font-weight:800;font-size:.88rem">Siswa Konsisten</div><div style="font-size:.74rem;color:var(--txl)">Melakukan piket 10 kali</div><div style="margin-top:4px" id="bsk"></div></div></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     PROFILE PAGE
+============================================================ -->
+<div class="page" id="pg-prof">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">👤 Profil Saya</span>
+    <div></div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div style="width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,var(--pu2),var(--pk2));margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:1.9rem">🙋</div>
+    <div style="font-size:1.12rem;font-weight:900" id="prn">—</div>
+    <div style="color:var(--txl);font-size:.78rem;margin-top:2px" id="prk">—</div>
+    <div style="margin-top:6px" id="prd"></div>
+    <div style="margin-top:7px" id="prb"></div>
+  </div>
+  <div class="sg">
+    <div class="si"><div class="sn" id="prtot">0</div><div class="sl">Total Piket</div></div>
+    <div class="si"><div class="sn" id="prstr">0</div><div class="sl">Bintang ⭐</div></div>
+  </div>
+  <div class="card">
+    <div class="stl">⚙️ Akun</div>
+    <p style="font-size:.82rem;color:var(--txl);margin-bottom:10px">Username: <strong id="pru">—</strong></p>
+    <button class="btn btn-s" onclick="openM('m-logout')">🚪 Keluar dari Akun</button>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     ADMIN DASHBOARD
+============================================================ -->
+<div class="page" id="pg-adm">
+  <div class="nav">
+    <div class="nav-logo">Kilas.Balik</div>
+    <div class="nav-r">
+      <span class="achip">👑 Admin</span>
+      <span style="cursor:pointer" onclick="openM('m-logout')">🚪</span>
+    </div>
+  </div>
+  <div class="gr">Dashboard <span>Admin</span> 📊</div>
+  <div class="grsub" id="adt"></div>
+
+  <div class="sg">
+    <div class="si"><div class="sn" id="as">0</div><div class="sl">Total Siswa</div></div>
+    <div class="si"><div class="sn" id="aph">0</div><div class="sl">Piket Hari Ini</div></div>
+    <div class="si"><div class="sn" id="abl">0</div><div class="sl">Belum Piket</div></div>
+    <div class="si"><div class="sn" id="atel">0</div><div class="sl">Telat Hari Ini</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:13px">
+    <button class="btn btn-p" style="border-radius:var(--r)" onclick="go('pg-stu')">👥 Data Siswa</button>
+    <button class="btn btn-pk" style="border-radius:var(--r)" onclick="go('pg-mon')">👁️ Monitor</button>
+    <button class="btn btn-s" style="border-radius:var(--r)" onclick="go('pg-phgal')">🖼️ Foto Piket</button>
+    <button class="btn btn-s" style="border-radius:var(--r)" onclick="go('pg-sch')">📅 Pengaturan</button>
+  </div>
+
+  <div class="stl">⚠️ Siswa Belum Piket Hari Ini</div>
+  <div id="aalert"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     ADMIN: DATA SISWA
+============================================================ -->
+<div class="page" id="pg-stu">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">👥 Data Siswa</span>
+    <span style="font-size:.72rem;font-weight:800;color:var(--pu)" id="stucnt"></span>
+  </div>
+  <input class="fi" id="stuq" type="text" placeholder="🔍 Cari nama / kelas / username..." oninput="renderStu()" style="margin-bottom:10px">
+  <div class="tabs">
+    <button class="tbn active" onclick="sflt('semua',this)">Semua</button>
+    <button class="tbn" onclick="sflt('Senin',this)">Senin</button>
+    <button class="tbn" onclick="sflt('Selasa',this)">Selasa</button>
+    <button class="tbn" onclick="sflt('Rabu',this)">Rabu</button>
+    <button class="tbn" onclick="sflt('Kamis',this)">Kamis</button>
+    <button class="tbn" onclick="sflt('Jumat',this)">Jumat</button>
+  </div>
+  <div id="stulist"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     ADMIN: MONITOR
+============================================================ -->
+<div class="page" id="pg-mon">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">👁️ Monitor Piket</span>
+    <div></div>
+  </div>
+  <div style="font-size:.75rem;color:var(--txl);font-weight:700;margin-bottom:8px" id="moni"></div>
+  <div class="tabs">
+    <button class="tbn active" onclick="mf('semua',this)">Semua Siswa</button>
+    <button class="tbn" onclick="mf('belum',this)">Belum Piket</button>
+    <button class="tbn" onclick="mf('tepat',this)">Tepat Waktu</button>
+    <button class="tbn" onclick="mf('telat',this)">Telat</button>
+  </div>
+  <div id="monlist"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     ADMIN: FOTO (dengan Realtime)
+============================================================ -->
+<div class="page" id="pg-phgal">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">🖼️ Foto Piket</span>
+    <span id="rt-status" class="rt-badge"><span class="rt-dot"></span>Live</span>
+  </div>
+  <!-- Realtime info banner -->
+  <div style="background:linear-gradient(135deg,#E8F5E9,#F1F8E9);border-radius:var(--rs);padding:9px 13px;margin-bottom:10px;font-size:.73rem;color:#2E7D32;font-weight:700;border:1px solid rgba(76,175,80,.18)">
+    🔴 Halaman ini diperbarui otomatis saat siswa upload foto baru!
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div class="tabs" style="margin-bottom:0;flex:1">
+      <button class="tbn active" onclick="pf('semua',this)">Semua</button>
+      <button class="tbn" onclick="pf('today',this)">Hari Ini</button>
+      <button class="tbn" onclick="pf('tepat',this)">Tepat</button>
+      <button class="tbn" onclick="pf('telat',this)">Telat</button>
+    </div>
+    <span style="font-size:.72rem;font-weight:800;color:var(--pu);margin-left:8px;white-space:nowrap" id="phcnt"></span>
+  </div>
+  <div id="phgal"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     ADMIN: PENGATURAN
+============================================================ -->
+<div class="page" id="pg-sch">
+  <div class="nav">
+    <button class="back-btn" onclick="back()">← Kembali</button>
+    <span style="font-weight:900;font-size:.92rem">📅 Pengaturan</span>
+    <div></div>
+  </div>
+  <div class="card">
+    <div class="stl">⏰ Jadwal Waktu</div>
+    <div class="fg"><label class="fl">Jam Pulang Sekolah</label><input class="fi" type="time" id="sp" value="15:00"></div>
+    <div class="fg"><label class="fl">Batas Upload Foto</label><input class="fi" type="time" id="sb" value="16:00"></div>
+    <div class="fg"><label class="fl">Jam Notifikasi Pengingat</label><input class="fi" type="time" id="sn" value="14:50"></div>
+    <button class="btn btn-p" onclick="saveSch()">💾 Simpan Jadwal</button>
+  </div>
+  <div class="card">
+    <div class="stl">🔔 Peringatan Telat</div>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div><div style="font-weight:800;font-size:.86rem">Aktifkan Peringatan</div><div style="font-size:.71rem;color:var(--txl)">Kirim notifikasi jika siswa belum upload</div></div>
+      <div class="tog on" id="wtog" onclick="togWarn()"><div class="tok"></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="stl">✅ Izin Melewati Batas</div>
+    <p style="font-size:.76rem;color:var(--txl);margin-bottom:10px">Siswa yang diberi izin tidak kena status Telat</p>
+    <div id="izinlist"></div>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ============================================================
+     MODALS
+============================================================ -->
+
+<!-- Admin Login -->
+<div class="mo" id="m-adm">
+  <div class="ms">
+    <div class="mh"></div>
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:2.4rem">👑</div>
+      <div style="font-size:1.08rem;font-weight:900;margin-top:5px">Login Admin</div>
+      <div style="font-size:.73rem;color:var(--txl);margin-top:3px">Gunakan akun admin sekolah</div>
+    </div>
+    <div class="fg"><label class="fl">Username Admin</label><input class="fi" id="alu" type="text" placeholder="admin1 / admin2 / admin3 / admin4" autocomplete="off"></div>
+    <div class="fg"><label class="fl">Password</label><input class="fi" id="alp" type="password" placeholder="Password admin"></div>
+    <div class="info-banner">💡 Demo: <strong>admin1</strong> / <strong>admin123</strong></div>
+    <button class="btn btn-p" onclick="doAdmLogin()">👑 Masuk sebagai Admin</button>
+    <button class="btn btn-s" style="margin-top:8px" onclick="closeM('m-adm')">Batal</button>
+  </div>
+</div>
+
+<!-- Notif -->
+<div class="mo" id="m-notif">
+  <div class="ms">
+    <div class="mh"></div>
+    <div style="font-size:.98rem;font-weight:900;margin-bottom:12px">🔔 Notifikasi</div>
+    <div id="nlist"></div>
+    <button class="btn btn-s" style="margin-top:8px" onclick="closeM('m-notif')">Tutup</button>
+  </div>
+</div>
+
+<!-- Photo View -->
+<div class="mo" id="m-photo">
+  <div class="ms">
+    <div class="mh"></div>
+    <div id="mpcon"></div>
+    <button class="btn btn-s" onclick="closeM('m-photo')">Tutup</button>
+  </div>
+</div>
+
+<!-- Student Detail -->
+<div class="mo" id="m-sdet">
+  <div class="ms">
+    <div class="mh"></div>
+    <div id="mscon"></div>
+    <button class="btn btn-s" style="margin-top:8px" onclick="closeM('m-sdet')">Tutup</button>
+  </div>
+</div>
+
+<!-- Logout -->
+<div class="mo" id="m-logout">
+  <div class="ms">
+    <div class="mh"></div>
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:2.4rem">🚪</div>
+      <div style="font-size:1.05rem;font-weight:900;margin-top:6px">Keluar dari Akun?</div>
+      <div style="font-size:.76rem;color:var(--txl);margin-top:4px">Kamu perlu login lagi setelahnya</div>
+    </div>
+    <button class="btn btn-p" onclick="doLogout()">✅ Ya, Keluar</button>
+    <button class="btn btn-s" style="margin-top:8px" onclick="closeM('m-logout')">Batal</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     JAVASCRIPT
+============================================================ -->
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════════════
+// ⚙️  KONFIGURASI SUPABASE — GANTI BAGIAN INI!
+// ════════════════════════════════════════════════════════════
+const SUPABASE_URL      = 'https://bbxcldzysmhopxjfufjs.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJieGNsZHp5c21ob3B4amZ1ZmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4OTA2MTMsImV4cCI6MjA4NzQ2NjYxM30.7cb3XDTs9HGkWVm_zeme9IbEUzv-Oj3xBPi6L1-euaA';
+// ════════════════════════════════════════════════════════════
+
+// Init Supabase client
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ─── ADMIN ACCOUNTS (tetap di sini, tidak disimpan ke DB) ────
+const ADMINS = [
+  {username:'admin1',password:'admin123',name:'Admin 1'},
+  {username:'admin2',password:'admin123',name:'Admin 2'},
+  {username:'admin3',password:'admin123',name:'Admin 3'},
+  {username:'admin4',password:'admin123',name:'Admin 4'},
+];
+
+// ─── APP STATE ────────────────────────────────────────────────
+let CU      = null;   // current user object
+let IS_ADM  = false;
+let PH      = [];     // page history
+let CUR     = 'pg-auth';
+let WARN    = true;
+let BEF     = null;   // before photo File object
+let AFT     = null;   // after photo File object
+let CDT     = null;   // countdown interval
+let HF_     = 'all';
+let SFLT_DAY= 'semua';
+let MF_     = 'semua';
+let PF_     = 'semua';
+
+// Local cache (ditarik dari Supabase)
+let STUDENTS = [];
+let RECORDS  = [];
+let NOTIFS   = [];
+let SCHEDULE = { jamPulang:'15:00', jamBatas:'16:00', jamNotif:'14:50' };
+let IZIN     = [];
+
+// ─── HELPERS ─────────────────────────────────────────────────
+function toast(msg, dur=3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+function todayStr() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+function todayDay() {
+  return ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'][new Date().getDay()];
+}
+function fmtDate(d) {
+  return new Date(d).toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+}
+function nowStr() {
+  const n = new Date();
+  return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`;
+}
+function isLateNow() {
+  const [bh, bm] = SCHEDULE.jamBatas.split(':').map(Number);
+  const n = new Date();
+  return n.getHours() > bh || (n.getHours() === bh && n.getMinutes() >= bm);
+}
+function starsFor(rec, uname) {
+  if (!rec) return 0;
+  if (IZIN.includes(uname)) return 3;
+  return rec.status === 'Tepat Waktu' ? 3 : 1;
+}
+function totalStars(uname) {
+  return RECORDS.filter(r => r.username === uname).reduce((s, r) => s + starsFor(r, uname), 0);
+}
+function todayRec(uname) {
+  return RECORDS.find(r => r.username === uname && r.date === todayStr());
+}
+function userRecs(uname) {
+  return RECORDS.filter(r => r.username === uname);
+}
+function calcBadges(uname) {
+  const recs  = userRecs(uname);
+  const tepat = recs.filter(r => r.status === 'Tepat Waktu').length;
+  const b = [];
+  if (recs.length >= 1) b.push('rajin');
+  if (recs.length >= 10) b.push('konsisten');
+  if (tepat >= 5 && recs.length > 0 && recs.every(r => r.status === 'Tepat Waktu')) b.push('pejuang');
+  return b;
+}
+function chipStatus(status) {
+  return status === 'Tepat Waktu' ? 'cg' : 'cr';
+}
+
+// ─── SUPABASE HELPERS ─────────────────────────────────────────
+
+// Upload file ke Storage, return public URL
+async function uploadToStorage(file, bucket, path) {
+  const { data, error } = await supa.storage.from(bucket).upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data: urlData } = supa.storage.from(bucket).getPublicUrl(path);
+  return urlData.publicUrl;
+}
+
+// Load semua siswa dari DB ke cache
+async function loadStudents() {
+  const { data, error } = await supa.from('students').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('loadStudents:', error); return; }
+  STUDENTS = data || [];
+}
+
+// Load semua records dari DB ke cache
+async function loadRecords() {
+  const { data, error } = await supa.from('records').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('loadRecords:', error); return; }
+  RECORDS = data || [];
+}
+
+// Load settings dari DB
+async function loadSettings() {
+  const { data } = await supa.from('settings').select('*').single();
+  if (data) {
+    SCHEDULE = { jamPulang: data.jam_pulang, jamBatas: data.jam_batas, jamNotif: data.jam_notif };
+    IZIN = data.izin || [];
+  }
+}
+
+// ─── REALTIME — Foto Piket (Admin lihat langsung) ─────────────
+let realtimeChannel = null;
+
+function subscribeRealtime() {
+  if (realtimeChannel) { supa.removeChannel(realtimeChannel); }
+
+  realtimeChannel = supa.channel('records-realtime')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'records'
+    }, (payload) => {
+      console.log('📸 Foto baru masuk!', payload.new);
+
+      // Tambahkan ke cache lokal
+      RECORDS.unshift(payload.new);
+
+      // Jika admin sedang di halaman foto → tambah kartu baru di atas
+      if (IS_ADM && CUR === 'pg-phgal') {
+        const rec = payload.new;
+        if (matchPhFilter(rec)) {
+          const el = document.getElementById('phgal');
+          const kartu = buatKartuFoto(rec);
+          kartu.classList.add('new-entry');
+          el.insertBefore(kartu, el.firstChild);
+
+          // Update counter
+          const cnt = el.querySelectorAll('.card').length;
+          document.getElementById('phcnt').textContent = `${cnt} foto`;
+        }
+        toast(`📸 Foto baru dari ${payload.new.name}!`, 4000);
+      }
+
+      // Jika admin di dashboard → refresh stats
+      if (IS_ADM && CUR === 'pg-adm') {
+        renderAdm();
+      }
+    })
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'students'
+    }, (payload) => {
+      console.log('👤 Siswa baru daftar!', payload.new);
+      STUDENTS.unshift(payload.new);
+      if (IS_ADM && CUR === 'pg-adm') renderAdm();
+      if (IS_ADM && CUR === 'pg-stu') renderStu();
+    })
+    .subscribe((status) => {
+      console.log('Realtime status:', status);
+    });
+}
+
+function matchPhFilter(rec) {
+  if (PF_ === 'semua') return true;
+  if (PF_ === 'today') return rec.date === todayStr();
+  if (PF_ === 'tepat') return rec.status === 'Tepat Waktu';
+  if (PF_ === 'telat') return rec.status === 'Telat';
+  return true;
+}
+
+function buatKartuFoto(r) {
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.style.cursor = 'pointer';
+  div.onclick = () => viewRec(r.id);
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+      <div>
+        <div style="font-weight:900;font-size:.88rem">${r.name}</div>
+        <div style="font-size:.7rem;color:var(--txl)">${r.kelas} · @${r.username}</div>
+        <div style="font-size:.68rem;color:var(--txl)">📅 ${r.date} · ⏰ ${r.upload_time}</div>
+      </div>
+      <span class="chip ${chipStatus(r.status)}">${r.status}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      ${r.bef_photo_url
+        ? `<div><div style="font-size:.66rem;font-weight:800;color:var(--txl);margin-bottom:2px">🌅 Sebelum</div><img src="${r.bef_photo_url}" style="width:100%;border-radius:8px;height:70px;object-fit:cover"></div>`
+        : `<div style="background:#f5f5f5;border-radius:8px;height:70px;display:flex;align-items:center;justify-content:center;font-size:.66rem;color:#bbb">Tidak ada</div>`}
+      ${r.aft_photo_url
+        ? `<div><div style="font-size:.66rem;font-weight:800;color:var(--txl);margin-bottom:2px">✨ Sesudah</div><img src="${r.aft_photo_url}" style="width:100%;border-radius:8px;height:70px;object-fit:cover"></div>`
+        : `<div style="background:#f5f5f5;border-radius:8px;height:70px;display:flex;align-items:center;justify-content:center;font-size:.66rem;color:#bbb">Tidak ada</div>`}
+    </div>
+  `;
+  return div;
+}
+
+// ─── NAVIGATION ──────────────────────────────────────────────
+function go(pageId) { PH.push(CUR); show(pageId); }
+
+function back() {
+  // Cari halaman sebelumnya yang valid (bukan pg-auth jika sudah login)
+  let prev = PH.pop();
+  // Kalau history kosong, fallback ke dashboard yang sesuai
+  if (!prev) {
+    prev = IS_ADM ? 'pg-adm' : (CU ? 'pg-dash' : 'pg-auth');
+  }
+  // Jangan balik ke auth kalau masih login
+  if (prev === 'pg-auth' && CU) {
+    prev = IS_ADM ? 'pg-adm' : 'pg-dash';
+  }
+  show(prev);
+}
+
+function show(pageId) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(pageId).classList.add('active');
+  CUR = pageId;
+  window.scrollTo(0, 0);
+  const map = {
+    'pg-dash': renderDash, 'pg-photo': initPhoto, 'pg-hist': renderHist,
+    'pg-badge': renderBadge, 'pg-prof': renderProf, 'pg-adm': renderAdm,
+    'pg-stu': renderStu, 'pg-mon': renderMon, 'pg-phgal': renderPhGal, 'pg-sch': renderSch,
+  };
+  if (map[pageId]) map[pageId]();
+}
+
+// ─── AUTH — ERROR HANDLING LENGKAP ──────────────────────────
+
+// Tampilkan error di kotak merah dalam form
+function showAuthErr(boxId, msg) {
+  const box = document.getElementById(boxId);
+  const txt = document.getElementById(boxId + '-txt');
+  if (!box || !txt) return;
+  txt.textContent = msg;
+  box.style.display = 'flex';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Tampilkan error di bawah field spesifik + border merah
+function showFieldErr(fieldId, msg) {
+  const field = document.getElementById(fieldId);
+  const errEl = document.getElementById('err-' + fieldId);
+  if (field) field.classList.add('err-field');
+  if (errEl) errEl.textContent = msg;
+}
+
+// Bersihkan error saat user mulai mengetik ulang
+function clearFieldErr(fieldId, boxId) {
+  const field = document.getElementById(fieldId);
+  const errEl = document.getElementById('err-' + fieldId);
+  if (field) { field.classList.remove('err-field'); field.classList.remove('ok-field'); }
+  if (errEl) errEl.textContent = '';
+  // Sembunyikan kotak error utama juga
+  const box = document.getElementById(boxId);
+  if (box) box.style.display = 'none';
+}
+
+// Reset semua error di form tertentu
+function resetFormErr(formId) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.querySelectorAll('.err-field').forEach(el => el.classList.remove('err-field'));
+  form.querySelectorAll('.field-err').forEach(el => el.textContent = '');
+  const boxId = formId === 'afl' ? 'err-login' : 'err-reg';
+  const box = document.getElementById(boxId);
+  if (box) box.style.display = 'none';
+}
+
+// Terjemahkan error Supabase menjadi pesan yang mudah dipahami
+function translateSupaErr(error) {
+  if (!error) return 'Terjadi kesalahan yang tidak diketahui.';
+  const msg = error.message || error.toString();
+  const code = error.code || '';
+  
+  // Error koneksi / URL salah
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch'))
+    return '❌ Gagal terhubung ke server. Periksa koneksi internet kamu, atau pastikan SUPABASE_URL sudah benar.';
+  
+  // API key salah
+  if (msg.includes('Invalid API key') || msg.includes('apikey') || code === 'invalid_api_key')
+    return '❌ API Key Supabase tidak valid. Periksa SUPABASE_ANON_KEY di kode.';
+  
+  // Tabel tidak ada
+  if (msg.includes('relation') && msg.includes('does not exist') || code === '42P01')
+    return '❌ Tabel "students" belum dibuat di Supabase. Jalankan SQL setup terlebih dahulu.';
+  
+  // RLS / Permission
+  if (msg.includes('row-level security') || msg.includes('permission') || msg.includes('403') || code === '42501')
+    return '❌ Akses ditolak (RLS). Di Supabase Dashboard → Table Editor → students → RLS, tambahkan policy INSERT dan SELECT untuk anon.';
+  
+  // Username sudah ada (unique constraint)
+  if (msg.includes('duplicate key') || msg.includes('unique') || code === '23505')
+    return 'Username ini sudah dipakai orang lain. Coba gunakan username yang berbeda.';
+  
+  // PGRST116 = tidak ada baris ditemukan (maybeSingle tidak melempar error, tapi single() ya)
+  if (code === 'PGRST116' || msg.includes('JSON object requested'))
+    return 'Username atau password salah.';
+
+  return msg;
+}
+
+function swTab(t) {
+  ['atl','atr'].forEach((id,i) => document.getElementById(id).classList.toggle('active', (i===0&&t==='l')||(i===1&&t==='r')));
+  ['afl','afr'].forEach((id,i) => document.getElementById(id).classList.toggle('active', (i===0&&t==='l')||(i===1&&t==='r')));
+  // Bersihkan semua error saat ganti tab
+  resetFormErr(t === 'l' ? 'afl' : 'afr');
+}
+
+// ── LOGIN ────────────────────────────────────────────────────
+async function doLogin() {
+  resetFormErr('afl');
+  const u = document.getElementById('lu').value.trim();
+  const p = document.getElementById('lp').value;
+
+  // Validasi client-side dulu
+  let hasErr = false;
+  if (!u) { showFieldErr('lu', 'Username tidak boleh kosong'); hasErr = true; }
+  if (!p) { showFieldErr('lp', 'Password tidak boleh kosong'); hasErr = true; }
+  if (hasErr) return;
+
+  // Loading state
+  const btn = document.getElementById('btn-login');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '<span class="spin"></span>Memeriksa...';
+  btn.disabled = true;
+
+  try {
+    // Cek apakah Supabase sudah dikonfigurasi
+    if (SUPABASE_URL.includes('XXXXXXX')) {
+      showAuthErr('err-login', 'Supabase belum dikonfigurasi! Isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian script.');
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    // Query ke Supabase — gunakan maybeSingle agar tidak throw error saat tidak ada hasil
+    const { data, error } = await supa
+      .from('students')
+      .select('*')
+      .eq('username', u)
+      .eq('password', p)
+      .maybeSingle();
+
+    if (error) {
+      showAuthErr('err-login', translateSupaErr(error));
+      console.error('Login error:', error);
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    if (!data) {
+      // Username ada tapi password salah, atau username tidak ada — jangan beritahu mana yang salah (keamanan)
+      showFieldErr('lu', '');
+      showFieldErr('lp', '');
+      showAuthErr('err-login', 'Username atau password salah. Coba lagi atau klik "Daftar" jika belum punya akun.');
+      document.getElementById('lu').classList.add('err-field');
+      document.getElementById('lp').classList.add('err-field');
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    // Sukses!
+    const idx = STUDENTS.findIndex(s => s.username === u);
+    if (idx >= 0) STUDENTS[idx] = data; else STUDENTS.unshift(data);
+    CU = data; IS_ADM = false; PH = [];
+    sessionStorage.setItem('kb_session', JSON.stringify({ type: 'student', user: data }));
+    show('pg-dash');
+    toast(`Selamat datang, ${data.name}! 🎉`);
+
+  } catch(e) {
+    showAuthErr('err-login', translateSupaErr(e));
+    console.error('Login exception:', e);
+    btn.innerHTML = origText; btn.disabled = false;
+  }
+}
+
+// ── REGISTER ─────────────────────────────────────────────────
+async function doRegister() {
+  resetFormErr('afr');
+  const u  = document.getElementById('ru').value.trim();
+  const nm = document.getElementById('rn').value.trim();
+  const kl = document.getElementById('rk').value.trim();
+  const dy = document.getElementById('rd').value;
+  const pw = document.getElementById('rp').value;
+
+  // Validasi client-side per field — user tahu mana yang salah
+  let hasErr = false;
+  if (!u) {
+    showFieldErr('ru', 'Username tidak boleh kosong'); hasErr = true;
+  } else if (!/^[a-zA-Z0-9_]+$/.test(u)) {
+    showFieldErr('ru', 'Username hanya boleh huruf, angka, dan underscore (_), tanpa spasi'); hasErr = true;
+  } else if (u.length < 3) {
+    showFieldErr('ru', 'Username minimal 3 karakter'); hasErr = true;
+  }
+  if (!nm) { showFieldErr('rn', 'Nama lengkap tidak boleh kosong'); hasErr = true; }
+  if (!kl) { showFieldErr('rk', 'Kelas tidak boleh kosong'); hasErr = true; }
+  if (!dy) { showFieldErr('rd', 'Pilih hari piket terlebih dahulu'); hasErr = true; }
+  if (!pw) {
+    showFieldErr('rp', 'Password tidak boleh kosong'); hasErr = true;
+  } else if (pw.length < 6) {
+    showFieldErr('rp', 'Password minimal 6 karakter (sekarang: ' + pw.length + ')'); hasErr = true;
+  }
+  if (hasErr) {
+    showAuthErr('err-reg', 'Ada ' + document.querySelectorAll('#afr .err-field').length + ' kolom yang perlu diperbaiki (lihat tanda merah di atas).');
+    return;
+  }
+
+  // Loading state
+  const btn = document.getElementById('btn-register');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '<span class="spin"></span>Mendaftarkan...';
+  btn.disabled = true;
+
+  try {
+    // Cek apakah Supabase sudah dikonfigurasi
+    if (SUPABASE_URL.includes('XXXXXXX')) {
+      showAuthErr('err-reg', 'Supabase belum dikonfigurasi! Isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian script.');
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    // Cek duplikat username dulu
+    const { data: existing, error: chkErr } = await supa
+      .from('students').select('username').eq('username', u).maybeSingle();
+
+    if (chkErr) {
+      showAuthErr('err-reg', translateSupaErr(chkErr));
+      console.error('Check username error:', chkErr);
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+    if (existing) {
+      showFieldErr('ru', 'Username "'+ u +'" sudah dipakai, coba nama lain');
+      showAuthErr('err-reg', 'Username sudah digunakan oleh siswa lain. Ganti dengan username berbeda.');
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    // Insert ke Supabase
+    const newUser = { username: u, name: nm, kelas: kl, day: dy, password: pw };
+    const { data, error } = await supa.from('students').insert(newUser).select().single();
+
+    if (error) {
+      showAuthErr('err-reg', translateSupaErr(error));
+      console.error('Register insert error:', error);
+      btn.innerHTML = origText; btn.disabled = false; return;
+    }
+
+    // Sukses!
+    STUDENTS.unshift(data);
+    CU = data; IS_ADM = false; PH = [];
+    sessionStorage.setItem('kb_session', JSON.stringify({ type: 'student', user: data }));
+    show('pg-dash');
+    toast(`Daftar berhasil! Selamat datang, ${nm}! 🌟`);
+
+  } catch(e) {
+    showAuthErr('err-reg', translateSupaErr(e));
+    console.error('Register exception:', e);
+    btn.innerHTML = origText; btn.disabled = false;
+  }
+}
+
+function doAdmLogin() {
+  const u = document.getElementById('alu').value.trim();
+  const p = document.getElementById('alp').value;
+  if (!u || !p) { toast('Isi username dan password admin!'); return; }
+  const adm = ADMINS.find(a => a.username === u && a.password === p);
+  if (!adm) { toast('❌ Username atau password admin salah!'); return; }
+
+  CU = adm; IS_ADM = true;
+  sessionStorage.setItem('kb_session', JSON.stringify({ type: 'admin', user: adm }));
+  closeM('m-adm');
+  PH = [];
+  subscribeRealtime();
+  show('pg-adm');
+  toast(`Selamat datang, ${adm.name}! 👑`);
+}
+
+function doLogout() {
+  CU = null; IS_ADM = false; BEF = null; AFT = null; PH = [];
+  if (CDT) clearInterval(CDT);
+  if (realtimeChannel) { supa.removeChannel(realtimeChannel); realtimeChannel = null; }
+  sessionStorage.removeItem('kb_session');
+  closeM('m-logout');
+  show('pg-auth');
+  ['lu','lp','alu','alp'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+}
+
+// ─── STUDENT DASHBOARD ───────────────────────────────────────
+async function renderDash() {
+  if (!CU || IS_ADM) return;
+  await loadRecords(); // refresh dari Supabase
+  document.getElementById('dn').textContent = CU.name.split(' ')[0];
+  document.getElementById('dd').textContent = fmtDate(new Date());
+
+  const recs = userRecs(CU.username);
+  const tr   = todayRec(CU.username);
+  const ts   = totalStars(CU.username);
+  const tep  = recs.filter(r => r.status === 'Tepat Waktu').length;
+  const tel  = recs.filter(r => r.status === 'Telat').length;
+
+  document.getElementById('dtot').textContent = recs.length;
+  document.getElementById('dstr').textContent = ts;
+  document.getElementById('dtep').textContent = tep;
+  document.getElementById('dtel').textContent = tel;
+
+  const isp = CU.day === todayDay();
+  document.getElementById('dpd').textContent = `Hari piketmu: ${CU.day}${isp ? ' 🗓️ Hari ini!' : ''}`;
+
+  let stxt = 'Belum Piket 🧹', sc = 0;
+  if (tr) { sc = starsFor(tr, CU.username); stxt = tr.status === 'Tepat Waktu' ? '✅ Tepat Waktu!' : '⚠️ Telat'; }
+  document.getElementById('dst').textContent = stxt;
+  document.querySelectorAll('#dstar-row .sis').forEach((s,i) => s.classList.toggle('se', i >= sc));
+
+  const pct = Math.min(100, Math.round((tep/5)*100));
+  document.getElementById('dpct').textContent = pct + '%';
+  document.getElementById('dbar').style.width = pct + '%';
+
+  const recent = [...recs].sort((a,b) => Number(b.id) - Number(a.id)).slice(0,3);
+  document.getElementById('drec').innerHTML = recent.length
+    ? recent.map(r => `
+        <div class="hrow" onclick="viewRec('${r.id}')">
+          <div><div style="font-weight:800;font-size:.84rem">${r.date}</div><div style="font-size:.7rem;color:var(--txl)">⏰ ${r.upload_time}</div></div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:.82rem">${'⭐'.repeat(starsFor(r,CU.username))}</span>
+            <span class="chip ${chipStatus(r.status)}">${r.status}</span>
+          </div>
+        </div>`).join('')
+    : '<div class="empty">Belum ada riwayat piket 🧹</div>';
+}
+
+// ─── PHOTO PAGE ──────────────────────────────────────────────
+function initPhoto() {
+  BEF = null; AFT = null;
+  ['bz','az'].forEach(id => document.getElementById(id).classList.remove('has'));
+  document.getElementById('bi').src = '';
+  document.getElementById('ai').src = '';
+  document.getElementById('btnSubmit').textContent = '🚀 Kirim Absen Piket';
+  document.getElementById('btnSubmit').disabled = false;
+  startCD();
+}
+
+function startCD() {
+  if (CDT) clearInterval(CDT);
+  const [bh, bm] = SCHEDULE.jamBatas.split(':').map(Number);
+  CDT = setInterval(() => {
+    const elCD = document.getElementById('phcd');
+    const elST = document.getElementById('phst');
+    if (!elCD) { clearInterval(CDT); return; }
+    const now = new Date(), dl = new Date();
+    dl.setHours(bh, bm, 0, 0);
+    const diff = dl - now;
+    if (diff <= 0) {
+      elCD.textContent = '⛔ Waktu Habis!';
+      elCD.style.color = 'var(--pk)';
+      elST.textContent = 'Batas waktu sudah lewat';
+      clearInterval(CDT); return;
+    }
+    const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000), s = Math.floor((diff%60000)/1000);
+    elCD.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    elCD.style.color  = diff < 1800000 ? 'var(--pk)' : 'var(--pu4)';
+  }, 1000);
+}
+
+function pickPh(side, src) {
+  const inp = document.getElementById(side === 'b' ? 'ib' : 'ia');
+  if (src === 'c') inp.setAttribute('capture','environment');
+  else inp.removeAttribute('capture');
+  inp.onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (side === 'b') BEF = f;
+    else AFT = f;
+    const rd = new FileReader();
+    rd.onload = ev => {
+      const d = ev.target.result;
+      if (side === 'b') { document.getElementById('bi').src = d; document.getElementById('bz').classList.add('has'); }
+      else { document.getElementById('ai').src = d; document.getElementById('az').classList.add('has'); }
+      toast('Foto berhasil dipilih! 📸');
+    };
+    rd.readAsDataURL(f);
+  };
+  inp.click();
+}
+
+async function submitPiket() {
+  if (!CU || IS_ADM) return;
+  if (!BEF || !AFT) { toast('Upload foto sebelum DAN sesudah piket ya!'); return; }
+
+  await loadRecords();
+  if (todayRec(CU.username)) { toast('Kamu sudah absen piket hari ini! 🎉'); return; }
+
+  const btn = document.getElementById('btnSubmit');
+  btn.innerHTML = '<span class="spin"></span>Mengupload...';
+  btn.disabled = true;
+
+  try {
+    const ts = Date.now();
+
+    // Upload ke Supabase Storage
+    const befPath = `piket/${CU.username}/${ts}_bef.jpg`;
+    const aftPath = `piket/${CU.username}/${ts}_aft.jpg`;
+    const [befUrl, aftUrl] = await Promise.all([
+      uploadToStorage(BEF, 'foto-piket', befPath),
+      uploadToStorage(AFT, 'foto-piket', aftPath),
+    ]);
+
+    const izin   = IZIN.includes(CU.username);
+    const status = (isLateNow() && !izin) ? 'Telat' : 'Tepat Waktu';
+    const rec = {
+      username    : CU.username,
+      name        : CU.name,
+      kelas       : CU.kelas,
+      day         : CU.day,
+      date        : todayStr(),
+      upload_time : nowStr(),
+      status,
+      bef_photo_url : befUrl,
+      aft_photo_url : aftUrl,
+    };
+
+    const { data, error } = await supa.from('records').insert(rec).select().single();
+    if (error) throw error;
+
+    RECORDS.unshift(data);
+
+    const st = starsFor(data, CU.username);
+    toast(`Absen berhasil! ${'⭐'.repeat(st)} — ${status}`, 4000);
+    BEF = null; AFT = null;
+    PH = ['pg-dash'];
+    show('pg-dash');
+
+  } catch (err) {
+    console.error('Submit piket error:', err);
+    toast('❌ Gagal upload: ' + err.message);
+    btn.innerHTML = '🚀 Kirim Absen Piket';
+    btn.disabled = false;
+  }
+}
+
+// ─── HISTORY ─────────────────────────────────────────────────
+function hf(f, btn) {
+  HF_ = f;
+  document.querySelectorAll('#pg-hist .tbn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderHist();
+}
+
+async function renderHist() {
+  if (!CU) return;
+  await loadRecords();
+  let recs = userRecs(CU.username).sort((a,b) => Number(b.id) - Number(a.id));
+  if (HF_ === 't') recs = recs.filter(r => r.status === 'Tepat Waktu');
+  if (HF_ === 'l') recs = recs.filter(r => r.status === 'Telat');
+  document.getElementById('hlist').innerHTML = recs.length
+    ? recs.map(r => `
+        <div class="hrow" onclick="viewRec('${r.id}')">
+          <div><div style="font-weight:800">${r.date}</div><div style="font-size:.7rem;color:var(--txl)">⏰ ${r.upload_time}</div></div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            <span style="font-size:.82rem">${'⭐'.repeat(starsFor(r,CU.username))}</span>
+            <span class="chip ${chipStatus(r.status)}">${r.status}</span>
+          </div>
+        </div>`).join('')
+    : '<div class="empty">Tidak ada riwayat piket</div>';
+}
+
+function viewRec(id) {
+  const r = RECORDS.find(x => x.id == id); if (!r) return;
+  const uname = r.username;
+  document.getElementById('mpcon').innerHTML = `
+    <div style="font-weight:900;font-size:1.02rem;margin-bottom:8px">📋 Detail Piket</div>
+    <div style="margin-bottom:10px">
+      ${IS_ADM ? `<div style="font-weight:800;font-size:.88rem;margin-bottom:5px">👤 ${r.name} — ${r.kelas}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        <span class="chip cp">📅 ${r.date}</span>
+        <span class="chip cpk">⏰ ${r.upload_time}</span>
+        <span class="chip ${chipStatus(r.status)}">${r.status}</span>
+        <span class="chip cgd">${'⭐'.repeat(starsFor(r,uname))}</span>
+      </div>
+    </div>
+    ${r.bef_photo_url ? `<div style="font-weight:800;font-size:.8rem;margin-bottom:4px">🌅 Sebelum Piket</div><img src="${r.bef_photo_url}" class="pmi">` : ''}
+    ${r.aft_photo_url ? `<div style="font-weight:800;font-size:.8rem;margin-bottom:4px">✨ Sesudah Piket</div><img src="${r.aft_photo_url}" class="pmi">` : ''}
+  `;
+  openM('m-photo');
+}
+
+// ─── BADGE ───────────────────────────────────────────────────
+async function renderBadge() {
+  if (!CU || IS_ADM) return;
+  await loadRecords();
+  const b  = calcBadges(CU.username);
+  const ts = totalStars(CU.username);
+  const tr = todayRec(CU.username);
+  const tsc= tr ? starsFor(tr,CU.username) : 0;
+
+  document.getElementById('bsc').textContent = `${ts} bintang total`;
+  document.querySelectorAll('#bsrow .sis').forEach((s,i) => s.classList.toggle('se', i >= tsc));
+
+  if      (b.includes('pejuang'))  { document.getElementById('bmi').textContent='🏅'; document.getElementById('bmt').textContent='Pejuang Kebersihan!'; document.getElementById('bmd').textContent='Kamu pejuang kebersihan sejati! 🎉'; }
+  else if (b.includes('konsisten')){ document.getElementById('bmi').textContent='🌟'; document.getElementById('bmt').textContent='Siswa Konsisten!'; document.getElementById('bmd').textContent='Sudah piket 10 kali!'; }
+  else if (b.includes('rajin'))    { document.getElementById('bmi').textContent='✨'; document.getElementById('bmt').textContent='Si Rajin!'; document.getElementById('bmd').textContent='Piket pertamamu berhasil!'; }
+
+  function setB(key,icoId,stId) {
+    const has = b.includes(key);
+    document.getElementById(icoId).classList.toggle('blk',!has);
+    document.getElementById(stId).innerHTML = has ? '<span class="chip cg">✅ Terbuka</span>' : '<span class="chip cp">Belum Terbuka</span>';
+  }
+  setB('rajin','bi-r','bsr'); setB('pejuang','bi-p','bsp'); setB('konsisten','bi-k','bsk');
+}
+
+// ─── PROFILE ─────────────────────────────────────────────────
+async function renderProf() {
+  if (!CU || IS_ADM) return;
+  await loadRecords();
+  const recs = userRecs(CU.username);
+  const b    = calcBadges(CU.username);
+  const emo  = { rajin:'✨', konsisten:'🌟', pejuang:'🏅' };
+
+  document.getElementById('prn').textContent  = CU.name;
+  document.getElementById('prk').textContent  = `Kelas ${CU.kelas}`;
+  document.getElementById('pru').textContent  = CU.username;
+  document.getElementById('prd').innerHTML    = `<span class="chip cp">🗓️ Piket ${CU.day}</span>`;
+  document.getElementById('prtot').textContent = recs.length;
+  document.getElementById('prstr').textContent = totalStars(CU.username);
+  document.getElementById('prb').innerHTML    = b.length
+    ? b.map(k => `<span style="font-size:1.3rem">${emo[k]}</span>`).join(' ')
+    : '<span style="font-size:.74rem;color:var(--txl)">Belum ada lencana</span>';
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────
+function openNotif() {
+  if (!CU) return;
+  const mine = NOTIFS.filter(n => n.to === CU.username).reverse();
+  NOTIFS.filter(n => n.to === CU.username).forEach(n => n.read = true);
+  document.getElementById('ndot').style.display = 'none';
+  document.getElementById('nlist').innerHTML = mine.length
+    ? mine.map(n => `
+        <div style="padding:9px;background:var(--pu3);border-radius:9px;margin-bottom:6px">
+          <div style="font-size:.82rem;font-weight:700">${n.msg}</div>
+          <div style="font-size:.68rem;color:var(--txl);margin-top:2px">⏰ ${n.time}</div>
+        </div>`).join('')
+    : '<div class="empty">Tidak ada notifikasi</div>';
+  openM('m-notif');
+}
+
+// ─── ADMIN DASHBOARD ─────────────────────────────────────────
+async function renderAdm() {
+  if (!IS_ADM) return;
+  document.getElementById('adt').textContent = fmtDate(new Date());
+
+  await Promise.all([loadStudents(), loadRecords()]);
+
+  const td    = todayStr();
+  const tday  = todayDay();
+  const tRecs = RECORDS.filter(r => r.date === td);
+  const piketHariIni = STUDENTS.filter(s => s.day === tday);
+  const belum = piketHariIni.filter(s => !tRecs.find(r => r.username === s.username));
+  const telat = tRecs.filter(r => r.status === 'Telat');
+
+  document.getElementById('as').textContent   = STUDENTS.length;
+  document.getElementById('aph').textContent  = tRecs.length;
+  document.getElementById('abl').textContent  = belum.length;
+  document.getElementById('atel').textContent = telat.length;
+
+  document.getElementById('aalert').innerHTML = belum.length
+    ? belum.map(s => `
+        <div class="srow2" onclick="showStuDet('${s.username}')">
+          <div class="sav">🙋</div>
+          <div class="sinf"><div class="snm">${s.name}</div><div class="smt">${s.kelas} · Piket ${s.day}</div></div>
+          <span class="chip co">Belum Piket</span>
+        </div>`).join('')
+    : `<div class="empty">${piketHariIni.length === 0 ? `Tidak ada siswa piket hari ${tday}` : '🎉 Semua sudah piket hari ini!'}</div>`;
+}
+
+// ─── ADMIN: DATA SISWA ───────────────────────────────────────
+function sflt(d, btn) {
+  SFLT_DAY = d;
+  document.querySelectorAll('#pg-stu .tbn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderStu();
+}
+
+async function renderStu() {
+  await loadStudents();
+  const q   = (document.getElementById('stuq')?.value || '').toLowerCase();
+  let   stu = [...STUDENTS];
+  if (SFLT_DAY !== 'semua') stu = stu.filter(s => s.day === SFLT_DAY);
+  if (q) stu = stu.filter(s => s.name.toLowerCase().includes(q) || s.kelas.toLowerCase().includes(q) || s.username.toLowerCase().includes(q));
+
+  document.getElementById('stucnt').textContent = `${stu.length} siswa`;
+  const td = todayStr();
+  const emo = { rajin:'✨', konsisten:'🌟', pejuang:'🏅' };
+
+  if (stu.length === 0) {
+    document.getElementById('stulist').innerHTML = STUDENTS.length === 0
+      ? '<div class="empty">Belum ada siswa yang mendaftar.<br>Minta siswa daftar akun terlebih dahulu.</div>'
+      : '<div class="empty">Tidak ada siswa ditemukan</div>';
+    return;
+  }
+
+  document.getElementById('stulist').innerHTML = stu.map(s => {
+    const sr = userRecs(s.username);
+    const tr = sr.find(r => r.date === td);
+    const bs = calcBadges(s.username);
+    return `
+      <div class="srow2" onclick="showStuDet('${s.username}')">
+        <div class="sav">🙋</div>
+        <div class="sinf">
+          <div class="snm">${s.name}</div>
+          <div class="smt">${s.kelas} · @${s.username} · Piket ${s.day}</div>
+          <div style="font-size:.82rem;margin-top:2px">${bs.map(k=>emo[k]).join('')||''}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          ${tr ? `<span class="chip ${chipStatus(tr.status)}">${tr.status}</span>` : '<span class="chip co">Belum</span>'}
+          <span class="chip cgd">⭐ ${totalStars(s.username)}</span>
+          <span style="font-size:.66rem;color:var(--txl)">${sr.length}× piket</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function showStuDet(uname) {
+  const s = STUDENTS.find(u => u.username === uname); if (!s) return;
+  const recs = userRecs(uname).sort((a,b) => Number(b.id)-Number(a.id));
+  const bs   = calcBadges(uname);
+  const ts   = totalStars(uname);
+  const emo  = { rajin:'✨', konsisten:'🌟', pejuang:'🏅' };
+  const tep  = recs.filter(r => r.status==='Tepat Waktu').length;
+  const tel  = recs.filter(r => r.status==='Telat').length;
+
+  document.getElementById('mscon').innerHTML = `
+    <div style="text-align:center;margin-bottom:13px">
+      <div style="font-size:2.4rem">🙋</div>
+      <div style="font-size:1.08rem;font-weight:900;margin-top:5px">${s.name}</div>
+      <div style="font-size:.76rem;color:var(--txl)">${s.kelas} · @${s.username}</div>
+      <div style="margin-top:6px;display:flex;flex-wrap:wrap;justify-content:center;gap:4px">
+        <span class="chip cp">🗓️ ${s.day}</span>
+        <span class="chip cgd">⭐ ${ts}</span>
+        <span class="chip cg">✅ ${tep}×</span>
+        <span class="chip cr">⚠️ ${tel}×</span>
+      </div>
+      <div style="margin-top:6px">
+        ${bs.length ? bs.map(k=>`<span class="chip cg" style="margin:2px">${emo[k]} ${k==='rajin'?'Si Rajin':k==='pejuang'?'Pejuang Kebersihan':'Siswa Konsisten'}</span>`).join('') : '<span style="font-size:.72rem;color:var(--txl)">Belum ada lencana</span>'}
+      </div>
+    </div>
+    <div style="font-weight:900;font-size:.9rem;margin-bottom:8px">📋 Riwayat Piket (${recs.length}×)</div>
+    ${recs.length === 0
+      ? '<div class="empty" style="padding:14px">Belum ada riwayat piket</div>'
+      : recs.slice(0,10).map(r=>`
+          <div class="hrow" onclick="closeM('m-sdet');setTimeout(()=>viewRec('${r.id}'),300)">
+            <div><div style="font-weight:800;font-size:.83rem">${r.date}</div><div style="font-size:.68rem;color:var(--txl)">⏰ ${r.upload_time}</div></div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <span style="font-size:.8rem">${'⭐'.repeat(starsFor(r,uname))}</span>
+              <span class="chip ${chipStatus(r.status)}">${r.status}</span>
+            </div>
+          </div>`).join('')}
+  `;
+  openM('m-sdet');
+}
+
+// ─── ADMIN: MONITOR ──────────────────────────────────────────
+function mf(f, btn) {
+  MF_ = f;
+  document.querySelectorAll('#pg-mon .tbn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderMon();
+}
+
+async function renderMon() {
+  await Promise.all([loadStudents(), loadRecords()]);
+  const td   = todayStr();
+  const tday = todayDay();
+  const tR   = RECORDS.filter(r => r.date === td);
+  document.getElementById('moni').textContent = `Semua siswa terdaftar — Hari ini: ${tday}, ${td}`;
+
+  const all = STUDENTS.map(s => {
+    const tr  = tR.find(r => r.username === s.username);
+    const isp = s.day === tday;
+    let   st  = 'tdk';
+    if (isp) st = tr ? (tr.status === 'Tepat Waktu' ? 'tepat' : 'telat') : 'belum';
+    return { ...s, tr, isp, st };
+  });
+
+  let list = all;
+  if (MF_ === 'belum') list = all.filter(d => d.st === 'belum');
+  if (MF_ === 'tepat') list = all.filter(d => d.st === 'tepat');
+  if (MF_ === 'telat') list = all.filter(d => d.st === 'telat');
+
+  const el = document.getElementById('monlist');
+  if (STUDENTS.length === 0) { el.innerHTML = '<div class="empty">Belum ada siswa yang mendaftar</div>'; return; }
+  if (list.length === 0) { el.innerHTML = '<div class="empty">Tidak ada data untuk filter ini</div>'; return; }
+
+  el.innerHTML = list.map(s => {
+    let chip = '';
+    if      (s.st==='tepat') chip = '<span class="chip cg">✅ Tepat Waktu</span>';
+    else if (s.st==='telat') chip = '<span class="chip cr">⚠️ Telat</span>';
+    else if (s.st==='belum') chip = '<span class="chip co">❌ Belum Piket</span>';
+    else                     chip = '<span class="chip cp">— Tdk Jadwal</span>';
+    return `
+      <div class="srow2" onclick="showStuDet('${s.username}')">
+        <div class="sav">🙋</div>
+        <div class="sinf">
+          <div class="snm">${s.name}</div>
+          <div class="smt">${s.kelas} · Jadwal: ${s.day}${s.isp?' 🗓️':''}</div>
+          ${s.tr ? `<div style="font-size:.66rem;color:var(--txl)">Upload: ${s.tr.upload_time}</div>` : ''}
+        </div>
+        ${chip}
+      </div>`;
+  }).join('');
+}
+
+// ─── ADMIN: FOTO (dengan Realtime) ───────────────────────────
+function pf(f, btn) {
+  PF_ = f;
+  document.querySelectorAll('#pg-phgal .tbn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderPhGal();
+}
+
+async function renderPhGal() {
+  await loadRecords();
+  let recs = [...RECORDS].sort((a,b) => Number(b.id) - Number(a.id));
+  const td = todayStr();
+  if (PF_ === 'today') recs = recs.filter(r => r.date === td);
+  if (PF_ === 'tepat') recs = recs.filter(r => r.status === 'Tepat Waktu');
+  if (PF_ === 'telat') recs = recs.filter(r => r.status === 'Telat');
+
+  document.getElementById('phcnt').textContent = `${recs.length} foto`;
+
+  const el = document.getElementById('phgal');
+  if (recs.length === 0) {
+    el.innerHTML = '<div class="empty">Belum ada foto piket tersimpan</div>';
+    return;
+  }
+  el.innerHTML = '';
+  recs.forEach(r => el.appendChild(buatKartuFoto(r)));
+}
+
+// ─── ADMIN: SCHEDULE ─────────────────────────────────────────
+async function renderSch() {
+  await loadSettings();
+  document.getElementById('sp').value = SCHEDULE.jamPulang;
+  document.getElementById('sb').value = SCHEDULE.jamBatas;
+  document.getElementById('sn').value = SCHEDULE.jamNotif;
+
+  document.getElementById('izinlist').innerHTML = STUDENTS.length
+    ? STUDENTS.map(s => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(179,157,219,.1)">
+          <div>
+            <div style="font-weight:800;font-size:.84rem">${s.name}</div>
+            <div style="font-size:.68rem;color:var(--txl)">${s.kelas} · Piket ${s.day}</div>
+          </div>
+          <div class="tog ${IZIN.includes(s.username)?'on':'off'}" id="iz-${s.username}" onclick="togIz('${s.username}')"><div class="tok"></div></div>
+        </div>`).join('')
+    : '<div style="color:var(--txl);font-size:.8rem">Belum ada siswa terdaftar</div>';
+}
+
+async function togIz(uname) {
+  const has = IZIN.includes(uname);
+  if (has) IZIN.splice(IZIN.indexOf(uname), 1);
+  else IZIN.push(uname);
+  const el = document.getElementById(`iz-${uname}`);
+  if (el) { el.classList.toggle('on',!has); el.classList.toggle('off',has); }
+
+  // Simpan ke Supabase
+  await supa.from('settings').upsert({ id: 1, jam_pulang: SCHEDULE.jamPulang, jam_batas: SCHEDULE.jamBatas, jam_notif: SCHEDULE.jamNotif, izin: IZIN });
+  toast(has ? 'Izin dicabut' : 'Izin diberikan ✅');
+}
+
+async function saveSch() {
+  SCHEDULE.jamPulang = document.getElementById('sp').value;
+  SCHEDULE.jamBatas  = document.getElementById('sb').value;
+  SCHEDULE.jamNotif  = document.getElementById('sn').value;
+  await supa.from('settings').upsert({ id: 1, jam_pulang: SCHEDULE.jamPulang, jam_batas: SCHEDULE.jamBatas, jam_notif: SCHEDULE.jamNotif, izin: IZIN });
+  toast('Jadwal berhasil disimpan! 💾');
+}
+
+function togWarn() {
+  WARN = !WARN;
+  const el = document.getElementById('wtog');
+  el.classList.toggle('on', WARN);
+  el.classList.toggle('off', !WARN);
+  toast(WARN ? 'Peringatan telat diaktifkan' : 'Peringatan telat dinonaktifkan');
+}
+
+// ─── MODALS ──────────────────────────────────────────────────
+function openM(id) {
+  document.getElementById(id).classList.add('open');
+  // Push state agar tombol back HP menutup modal
+  history.pushState({ modal: id }, '');
+}
+function closeM(id){
+  document.getElementById(id).classList.remove('open');
+}
+document.querySelectorAll('.mo').forEach(o => {
+  o.addEventListener('click', function(e){ if(e.target===this) this.classList.remove('open'); });
+});
+
+// Tangani tombol back browser/Android
+window.addEventListener('popstate', (e) => {
+  // Cek apakah ada modal yang terbuka
+  const openModal = document.querySelector('.mo.open');
+  if (openModal) {
+    openModal.classList.remove('open');
+    return;
+  }
+  // Kalau tidak ada modal, jalankan back navigasi halaman
+  back();
+});
+
+// ─── INIT ────────────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  setTimeout(() => document.getElementById('splash').classList.add('out'), 2600);
+
+  // ─── Cek dan tampilkan status koneksi Supabase ────────────────
+  const dot = document.getElementById('supa-dot');
+  const msg = document.getElementById('supa-msg');
+  
+  if (SUPABASE_URL.includes('XXXXXXX') || SUPABASE_ANON_KEY.includes('MASUKKAN')) {
+    if(dot) dot.style.background = '#F44336';
+    if(msg) msg.innerHTML = '⚠️ <strong>Supabase belum dikonfigurasi!</strong> Isi SUPABASE_URL dan SUPABASE_ANON_KEY di kode.';
+    console.warn('Supabase URL/Key belum diisi');
+  } else {
+    // Load data awal dari Supabase — dan test koneksi
+    try {
+      await Promise.all([loadStudents(), loadRecords(), loadSettings()]);
+      if(dot) dot.style.background = '#4CAF50';
+      if(msg) msg.textContent = '✅ Terhubung ke Supabase — siap digunakan!';
+      console.log('✅ Data loaded from Supabase');
+    } catch(e) {
+      if(dot) dot.style.background = '#F44336';
+      if(msg) msg.innerHTML = '❌ <strong>Gagal konek Supabase:</strong> ' + e.message;
+      console.warn('⚠️ Supabase error:', e.message);
+    }
+  }
+
+  // ─── Restore sesi jika ada (agar tidak logout saat refresh) ───
+  try {
+    const saved = sessionStorage.getItem('kb_session');
+    if (saved) {
+      const sess = JSON.parse(saved);
+      if (sess.type === 'admin') {
+        CU = sess.user; IS_ADM = true; PH = [];
+        subscribeRealtime();
+        // Tunda sedikit agar splash selesai animasi
+        setTimeout(() => show('pg-adm'), 200);
+        return;
+      } else if (sess.type === 'student') {
+        // Re-fetch data terbaru dari Supabase berdasarkan username
+        const { data } = await supa.from('students').select('*').eq('username', sess.user.username).single();
+        CU = data || sess.user; IS_ADM = false; PH = [];
+        setTimeout(() => show('pg-dash'), 200);
+        return;
+      }
+    }
+  } catch(e) {
+    console.warn('Gagal restore sesi:', e.message);
+    sessionStorage.removeItem('kb_session');
+  }
+});
+</script>
+</body>
+</html>
