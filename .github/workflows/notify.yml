@@ -1,0 +1,106 @@
+name: Kirim Notifikasi Piket
+
+on:
+  schedule:
+    # Jam 14.50 WIB = 07.50 UTC (WIB = UTC+7)
+    - cron: '50 7 * * 1-5'
+    # Jam 16.00 WIB = 09.00 UTC
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch: # Bisa juga dijalankan manual
+
+jobs:
+  kirim-notif:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install firebase-admin @supabase/supabase-js
+
+      - name: Kirim Notifikasi
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          node << 'EOF'
+          const admin = require('firebase-admin');
+          const { createClient } = require('@supabase/supabase-js');
+
+          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+          admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+
+          const supa = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+          const HARI = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+          const now  = new Date();
+          const wib  = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+          const hariIni = HARI[wib.getDay()];
+          const jamWIB  = wib.getHours();
+
+          const dd = String(wib.getDate()).padStart(2,'0');
+          const mm = String(wib.getMonth()+1).padStart(2,'0');
+          const todayStr = `${dd}/${mm}/${wib.getFullYear()}`;
+
+          console.log(`WIB: ${jamWIB}:${String(wib.getMinutes()).padStart(2,'0')} | Hari: ${hariIni} | Tanggal: ${todayStr}`);
+
+          async function main() {
+            const { data: siswa, error } = await supa
+              .from('students')
+              .select('*')
+              .eq('day', hariIni)
+              .eq('role', 'siswa')
+              .not('fcm_token', 'is', null);
+
+            if (error) { console.error('Error:', error.message); return; }
+            if (!siswa || siswa.length === 0) {
+              console.log('Tidak ada siswa piket hari ini atau belum ada FCM token.'); return;
+            }
+
+            console.log(`Siswa piket hari ini: ${siswa.length} orang`);
+
+            const { data: records } = await supa
+              .from('records').select('username').eq('date', todayStr);
+
+            const sudahUpload = new Set((records || []).map(r => r.username));
+            const belumUpload = siswa.filter(s => !sudahUpload.has(s.username));
+
+            console.log(`Belum upload: ${belumUpload.length} orang`);
+            if (belumUpload.length === 0) {
+              console.log('Semua sudah upload! Tidak ada notif dikirim. ✅'); return;
+            }
+
+            // Pesan berdasarkan jam
+            const title = 'Kilas.Balik 🧹';
+            const body  = jamWIB < 15
+              ? 'Hari ini giliran kamu piket, jangan lupa ya! 🧹😜'
+              : 'FOTO PIKET NYA MANA?! 🙄';
+
+            let berhasil = 0, gagal = 0;
+            for (const s of belumUpload) {
+              try {
+                await admin.messaging().send({
+                  token: s.fcm_token,
+                  notification: { title, body },
+                  android: { priority: 'high', notification: { sound: 'default', channelId: 'piket-reminder' } },
+                  apns: { payload: { aps: { sound: 'default', badge: 1 } } }
+                });
+                console.log(`✅ Terkirim ke ${s.name}`);
+                berhasil++;
+              } catch(err) {
+                console.log(`❌ Gagal ke ${s.name}: ${err.message}`);
+                if (err.code === 'messaging/invalid-registration-token' ||
+                    err.code === 'messaging/registration-token-not-registered') {
+                  await supa.from('students').update({ fcm_token: null }).eq('id', s.id);
+                }
+                gagal++;
+              }
+            }
+            console.log(`\nSelesai! Berhasil: ${berhasil}, Gagal: ${gagal}`);
+          }
+
+          main().catch(console.error);
+          EOF
